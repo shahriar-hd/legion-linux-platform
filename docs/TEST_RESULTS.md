@@ -25,3 +25,4 @@
 - systemd user service start at login and re-apply after suspend/resume.
 - Passwordless Polkit behaviour after installing the rule.
 - CPU package power (RAPL is root-only on this machine).
+- **Daemon dry-run:** `./build/legion-lightd --config /tmp/legion-test.conf --once --dry-run` — parsed a Rainbow profile and logged the intended apply without touching hardware.

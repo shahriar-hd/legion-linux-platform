@@ -165,6 +165,7 @@ struct Options {
     std::string socket_path;
     bool once = false;
     bool verbose = false;
+    bool dry_run = false;
 };
 
 Options parse_options(int argc, char* argv[]) {
@@ -181,8 +182,10 @@ Options parse_options(int argc, char* argv[]) {
             options.once = true;
         } else if (arg == "--verbose" || arg == "-v") {
             options.verbose = true;
+        } else if (arg == "--dry-run") {
+            options.dry_run = true;
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: legion-lightd [--config PATH] [--socket PATH] [--once] [--verbose]\n";
+            std::cout << "Usage: legion-lightd [--config PATH] [--socket PATH] [--once] [--verbose] [--dry-run]\n";
             std::exit(0);
         }
     }
@@ -236,6 +239,11 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         const auto& profile = config.profiles[static_cast<std::size_t>(config.active_profile)];
+        if (options.dry_run) {
+            log_line("dry-run: would apply " + legion::core::to_string(profile.effect) +
+                     " (profile " + std::to_string(config.active_profile + 1) + ")");
+            return 0;
+        }
         std::string error;
         if (!apply_hardware(*session, profile, error)) {
             log_line("apply failed: " + error);
@@ -287,6 +295,10 @@ int main(int argc, char* argv[]) {
         }
 
         const auto& profile = config.profiles[static_cast<std::size_t>(config.active_profile)];
+        if (options.dry_run) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            continue;
+        }
         if (legion::core::is_software_effect(profile.effect)) {
             if (!session->is_open()) {
                 std::string error;
