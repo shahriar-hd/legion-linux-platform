@@ -1,0 +1,13 @@
+[Unit]
+Description=Legion Linux keyboard lighting daemon
+Documentation=file:/usr/local/share/doc/legion-linux-platform/README.md
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/legion-lightd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,27 @@
+# Test Results
+
+## 2026-11-25 — Milestone 1 build and verification
+- **Build:** `cmake -B build -G Ninja && cmake --build build` — passed.
+- **Unit tests:** `ctest --test-dir build --output-on-failure` — passed (mocked `ISysfsReader` / `IProcessRunner`).
+- **Real-hardware read-only run:** `./build/legion-cli` — passed on `Legion 5 Pro 16ITH6 (82JF)`, BIOS `H1CN58WW`, kernel `7.0.0-34-generic`.
+
+## 2026-11-25 — GUI, helper, and static 4-zone RGB
+- **Build:** `legion-cli`, `legion-helper`, `legion-gui`, `legion_unit_tests` — passed.
+- **Real-hardware static RGB:** previously reported working through `HIDIOCSFEATURE` on `048d:c965`.
+
+## 2026-11-25 — Profiles, effects, daemon, dashboard
+- **Build:** `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build` — passed with no warnings.
+- **Unit tests:** `ctest --test-dir build --output-on-failure` — **2/2 passed**:
+  - `legion_unit_tests` — telemetry parsing, timeout handling, VPC/RGB detection.
+  - `legion_lighting_tests` — config round-trip, effect aliases, report byte layout, wave direction flags, off/smooth, invalid ranges, frame sampler determinism, HSV conversion.
+- **Read-only CLI:** `./build/legion-cli` — passed. New readings observed: CPU max frequency, storage total/used/percent, NVIDIA graphics clock. NVIDIA fan reported `N/A` (`temporarily_unavailable`).
+- **GUI smoke test:** `QT_QPA_PLATFORM=offscreen timeout 3 ./build/legion-gui` — started without crashing; the Qt offscreen plugin printed only `propagateSizeHints()`.
+- **Daemon one-shot:** `./build/legion-lightd --once` without a config exits cleanly and does not write hardware.
+
+## Not yet verified
+
+- Physical confirmation of Breathing, Wave (both directions), Smooth, Heartbeat, Rainbow, Dance, Random and Reactive on the real keyboard.
+- udev `uaccess` access after install and reconnect.
+- systemd user service start at login and re-apply after suspend/resume.
+- Passwordless Polkit behaviour after installing the rule.
+- CPU package power (RAPL is root-only on this machine).

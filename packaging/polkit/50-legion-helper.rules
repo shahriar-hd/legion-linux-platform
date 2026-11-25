@@ -1,0 +1,11 @@
+// Passwordless Polkit authorization for the narrow, allowlisted legion-helper.
+// The helper only accepts fixed keys/values and a validated HID feature report.
+// This is a deliberate convenience trade-off for the local desktop user in
+// the sudo/wheel/admin groups. Remove this file to restore password prompts.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.policykit.exec" &&
+        action.lookup("program") == "/usr/local/bin/legion-helper" &&
+        (subject.isInGroup("sudo") || subject.isInGroup("wheel") || subject.isInGroup("admin"))) {
+        return polkit.Result.YES;
+    }
+});
