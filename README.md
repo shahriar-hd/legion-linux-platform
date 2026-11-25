@@ -101,6 +101,7 @@ Validate a profile without touching hardware:
 - No raw EC/PCI/MMIO writes, no voltage or clock overrides, no kernel modules.
 - A successful HID write or sysfs write is reported as **write reported**, not as physical success. The physical keyboard must be confirmed by the user.
 - CPU package power needs privileged RAPL access on many systems; when `energy_uj` is not readable the CPU gauge falls back to frequency and does not claim power telemetry.
+- Fan gauges appear only when the kernel exposes hwmon fan inputs. On this machine the stock kernel exposes no fan sensors; LenovoLegionLinux/`legion_laptop` would add them.
 - Software effects run at a bounded frame rate and stop on write failure.
 
 ## Supported hardware

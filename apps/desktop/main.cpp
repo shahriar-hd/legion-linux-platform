@@ -36,7 +36,6 @@
 #include <QStackedWidget>
 #include <QStringList>
 #include <QTabBar>
-#include <QTabWidget>
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
