@@ -238,6 +238,10 @@ bool RgbSession::apply_zones(const std::array<core::Rgb, 4>& zones, int brightne
     return send(report, error);
 }
 
+void RgbSession::reset() {
+    impl_->close_all();
+}
+
 std::string RgbSession::device_summary() const {
     std::string summary;
     for (std::size_t i = 0; i < impl_->paths.size(); ++i) {

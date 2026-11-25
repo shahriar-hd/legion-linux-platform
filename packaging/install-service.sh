@@ -38,9 +38,11 @@ if [[ -z "${TARGET_HOME}" ]]; then
     exit 1
 fi
 
-install -D -m 0644 "${ROOT_DIR}/packaging/systemd/legion-lightd.service" \
+TARGET_GROUP="$(id -gn "${TARGET_USER}")"
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/systemd/user"
+install -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" \
+    "${ROOT_DIR}/packaging/systemd/legion-lightd.service" \
     "${TARGET_HOME}/.config/systemd/user/legion-lightd.service"
-chown -R "${TARGET_USER}":"${TARGET_USER}" "${TARGET_HOME}/.config/systemd/user"
 
 echo "System files installed and user service copied for ${TARGET_USER}."
 echo "Enable it from ${TARGET_USER}'s desktop session with:"

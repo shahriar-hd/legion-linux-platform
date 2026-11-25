@@ -53,6 +53,8 @@ void test_effect_aliases_and_paths() {
     assert(legion::core::is_hardware_effect(legion::core::LightingEffect::Smooth));
     assert(!legion::core::is_hardware_effect(legion::core::LightingEffect::Rainbow));
     assert(legion::core::is_software_effect(legion::core::LightingEffect::Heartbeat));
+    assert(!legion::core::parse_lighting_config("").has_value());
+    assert(!legion::core::parse_lighting_config("not a lighting config").has_value());
 }
 
 void test_static_report_layout() {

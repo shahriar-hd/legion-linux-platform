@@ -214,6 +214,7 @@ std::optional<LightingConfig> parse_lighting_config(const std::string& text) {
     }
 
     LightingConfig config;
+    bool recognized = false;
     std::istringstream input(text);
     std::string line;
     while (std::getline(input, line)) {
@@ -225,13 +226,16 @@ std::optional<LightingConfig> parse_lighting_config(const std::string& text) {
         const std::string value = trim(line.substr(equals + 1));
 
         if (key == "active_profile") {
+            recognized = true;
             try {
                 config.active_profile = clamp_int(std::stoi(value), 0, 3);
             } catch (...) {
             }
         } else if (key == "apply_on_login") {
+            recognized = true;
             config.apply_on_login = value != "0" && value != "false";
         } else if (key.rfind("profile.", 0) == 0) {
+            recognized = true;
             const auto field_dot = key.find('.', 8);
             if (field_dot == std::string::npos) continue;
             int index = -1;
@@ -281,6 +285,9 @@ std::optional<LightingConfig> parse_lighting_config(const std::string& text) {
                 }
             }
         }
+    }
+    if (!recognized) {
+        return std::nullopt;
     }
     return config;
 }

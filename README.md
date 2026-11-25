@@ -87,7 +87,13 @@ Profiles are stored at:
 ~/.config/legion-linux-platform/lighting.conf
 ```
 
-The daemon listens on `$XDG_RUNTIME_DIR/legion-lightd.sock` so the GUI can request an immediate reload after saving. If the daemon is not running, the GUI applies the profile directly and animates software effects itself.
+The daemon listens on `$XDG_RUNTIME_DIR/legion-lightd.sock` so the GUI can request an immediate reload after saving. If the daemon is not running, the GUI applies the profile directly and animates software effects itself. Hardware effects also fall back to `legion-helper` through Polkit when direct hidraw access is denied.
+
+Validate a profile without touching hardware:
+
+```bash
+./build/legion-lightd --once --dry-run
+```
 
 ## Safety and verification
 

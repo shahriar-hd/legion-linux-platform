@@ -814,15 +814,24 @@ private:
 
         stop_live_animation();
         if (!direct_session_.is_open() && !direct_session_.open(error)) {
+            if (legion::core::is_hardware_effect(profile.effect)) {
+                if (run_helper(rgb_helper_args(profile))) {
+                    rgb_status_label_->setText(
+                        "Saved and applied through legion-helper. Write was reported; confirm the physical keyboard.");
+                } else {
+                    rgb_status_label_->setText("Saved, but the keyboard could not be written.");
+                }
+                return;
+            }
             QMessageBox::warning(
                 this, "RGB Access Failed",
                 QString::fromStdString(error) +
-                    "\n\nInstall packaging/udev/60-legion-rgb.rules so your user can access /dev/hidraw, "
-                    "or run the helper through Polkit.");
+                    "\n\nInstall packaging/udev/60-legion-rgb.rules so your user can access /dev/hidraw.");
             rgb_status_label_->setText("Saved, but the keyboard could not be written.");
             return;
         }
         if (!direct_session_.apply(profile, error)) {
+            direct_session_.reset();
             QMessageBox::warning(this, "RGB Write Failed", QString::fromStdString(error));
             rgb_status_label_->setText("Saved, but the write failed.");
             return;
@@ -835,8 +844,10 @@ private:
         stop_live_animation();
         std::string error;
         if (!direct_session_.is_open() && !direct_session_.open(error)) {
-            rgb_status_label_->setText(QString("Saved, but RGB access failed: %1")
-                                           .arg(QString::fromStdString(error)));
+            rgb_status_label_->setText(
+                QString("Saved, but RGB access failed: %1. Install packaging/udev/60-legion-rgb.rules "
+                        "so this app can animate the effect.")
+                    .arg(QString::fromStdString(error)));
             return;
         }
         live_profile_ = profile;
@@ -860,6 +871,7 @@ private:
         std::string error;
         if (!direct_session_.apply_zones(frame, live_profile_.brightness, error)) {
             stop_live_animation();
+            direct_session_.reset();
             rgb_status_label_->setText(QString("Live animation stopped: %1")
                                            .arg(QString::fromStdString(error)));
         }
@@ -872,23 +884,39 @@ private:
         return QDir(app_dir).filePath("legion-helper");
     }
 
-    void run_helper(const QStringList& args) {
+    QStringList rgb_helper_args(const legion::core::LightingProfile& profile) const {
+        if (profile.effect == legion::core::LightingEffect::Off) {
+            return {"rgb", "off"};
+        }
+        QStringList args{"rgb"};
+        args << QString::fromStdString(legion::core::to_string(profile.effect))
+             << QString::number(profile.speed)
+             << QString::number(profile.brightness)
+             << QString::fromStdString(legion::core::to_string(profile.direction));
+        for (const auto& zone : profile.zones) {
+            args << QString::number(zone.r) << QString::number(zone.g) << QString::number(zone.b);
+        }
+        return args;
+    }
+
+    bool run_helper(const QStringList& args) {
         QStringList full_args;
         full_args << find_helper_path() << args;
         QProcess process;
         process.start("pkexec", full_args);
         if (!process.waitForFinished(20000)) {
             QMessageBox::warning(this, "Timeout", "Polkit helper timed out.");
-            return;
+            return false;
         }
         if (process.exitCode() != 0) {
             const QString error = QString::fromUtf8(process.readAllStandardError()).trimmed();
             QMessageBox::warning(this, "Write Failed",
                                  error.isEmpty() ? "Authorization cancelled or helper failed." : error);
-            return;
+            return false;
         }
         status_label_->setText(QString::fromUtf8(process.readAllStandardOutput()).trimmed());
         refresh_data();
+        return true;
     }
 
     void apply_control(const QString& key, const QString& value) {

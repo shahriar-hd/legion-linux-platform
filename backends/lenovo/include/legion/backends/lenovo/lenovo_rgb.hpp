@@ -40,6 +40,7 @@ public:
     bool send(const RgbReport& report, std::string& error);
     bool apply(const core::LightingProfile& profile, std::string& error);
     bool apply_zones(const std::array<core::Rgb, 4>& zones, int brightness, std::string& error);
+    void reset();
     std::string device_summary() const;
 
 private:
