@@ -32,7 +32,7 @@ The project separates read-only telemetry from privileged writes, keeps the GUI 
 - **Software effects** animated by `legion-lightd` (or by the app when the daemon is not running):
   - Heartbeat, Rainbow, Dance/disco, Random, Reactive (preview click-to-flash).
 - Painted keyboard preview with clickable zones and colour pickers.
-- The daemon re-applies the saved profile at login and after suspend/resume.
+- The daemon re-applies the saved profile at login and after suspend/resume (toggle **Apply this profile at login** in the RGB tab).
 
 Lenovo Vantage's own four hardware slots are controlled by the EC and are **not** programmable through the documented HID protocol. This app therefore keeps four equivalent userspace profiles instead of pretending to edit Vantage's slots.
 

@@ -481,6 +481,10 @@ public:
         profile_row2->addWidget(off_rgb_btn);
         rgb_root->addLayout(profile_row2);
 
+        apply_on_login_cb_ = new QCheckBox("Apply this profile at login (legion-lightd)", this);
+        apply_on_login_cb_->setChecked(lighting_config_.apply_on_login);
+        rgb_root->addWidget(apply_on_login_cb_);
+
         auto* rgb_body = new QHBoxLayout();
         auto* keyboard_column = new QVBoxLayout();
         keyboard_ = new KeyboardWidget(this);
@@ -611,6 +615,9 @@ public:
         });
         connect(rgb_direction_combo_, &QComboBox::currentIndexChanged, this, [this](int) {
             store_controls_into_profile(current_profile_);
+        });
+        connect(apply_on_login_cb_, &QCheckBox::toggled, this, [this](bool enabled) {
+            lighting_config_.apply_on_login = enabled;
         });
         connect(apply_rgb_btn, &QPushButton::clicked, this, &LegionMainWindow::apply_lighting);
         connect(off_rgb_btn, &QPushButton::clicked, this, [this]() {
@@ -787,6 +794,7 @@ private:
     void apply_lighting() {
         store_controls_into_profile(current_profile_);
         lighting_config_.active_profile = current_profile_;
+        lighting_config_.apply_on_login = apply_on_login_cb_->isChecked();
         const auto& profile = lighting_config_.profiles[static_cast<std::size_t>(current_profile_)];
 
         std::string error;
@@ -1163,6 +1171,7 @@ private:
     std::array<QPushButton*, 4> zone_buttons_ = {nullptr, nullptr, nullptr, nullptr};
     KeyboardWidget* keyboard_ = nullptr;
     QComboBox* rgb_profile_combo_ = nullptr;
+    QCheckBox* apply_on_login_cb_ = nullptr;
     QComboBox* rgb_mode_combo_ = nullptr;
     QSpinBox* rgb_speed_spin_ = nullptr;
     QComboBox* rgb_brightness_combo_ = nullptr;
