@@ -10,7 +10,7 @@ The project separates read-only telemetry from privileged writes, keeps the GUI 
 
 - Large multi-arc gauges with separate rings and colours for each metric:
   - **CPU** — utilization, package power (or frequency when RAPL is unavailable), temperature, plus frequency text in the centre.
-  - **GPU** — utilization, power, temperature, clock and fan telemetry through `nvidia-smi`.
+  - **GPU** — utilization, power against the reported max limit, temperature, clock and fan telemetry through `nvidia-smi`.
   - **NVMe / storage** — drive temperature and root filesystem usage.
   - **Battery** — charge, health and power draw.
   - **Memory** — usage and used/total GiB.

@@ -1039,17 +1039,21 @@ private:
         const double gpu_power = numbers.count("nvidia.gpu.power") ? numbers["nvidia.gpu.power"] : 0.0;
         const double gpu_clock = numbers.count("nvidia.gpu.clock_mhz") ? numbers["nvidia.gpu.clock_mhz"] : 0.0;
         const double gpu_fan = numbers.count("nvidia.gpu.fan_percent") ? numbers["nvidia.gpu.fan_percent"] : 0.0;
+        const double gpu_power_limit = numbers.count("nvidia.gpu.power_limit")
+            ? std::max(1.0, numbers["nvidia.gpu.power_limit"]) : 140.0;
         QVector<GaugeArc> gpu_arcs;
         gpu_arcs.append({"Usage", gpu_util, 0.0, 100.0, QColor("#00d4ff"),
                          numbers.count("nvidia.gpu.util") > 0, "%", 0});
-        gpu_arcs.append({"Power", gpu_power, 0.0, 140.0, QColor("#ffb300"),
+        gpu_arcs.append({"Power", gpu_power, 0.0, gpu_power_limit, QColor("#ffb300"),
                          numbers.count("nvidia.gpu.power") > 0, "W", 0});
         gpu_arcs.append({"Temp", gpu_temp, 0.0, 95.0, temp_color(gpu_temp, 75.0, 86.0),
                          has_gpu, "°C", 0});
         gpu_gauge_->set_arcs(gpu_arcs);
         QStringList gpu_parts;
         if (numbers.count("nvidia.gpu.clock_mhz")) gpu_parts << QString("%1 MHz").arg(gpu_clock, 0, 'f', 0);
-        if (numbers.count("nvidia.gpu.power")) gpu_parts << QString("%1 W").arg(gpu_power, 0, 'f', 1);
+        if (numbers.count("nvidia.gpu.power")) {
+            gpu_parts << QString("%1 / %2 W").arg(gpu_power, 0, 'f', 1).arg(gpu_power_limit, 0, 'f', 0);
+        }
         if (numbers.count("nvidia.gpu.fan_percent")) gpu_parts << QString("Fan %1%").arg(gpu_fan, 0, 'f', 0);
         gpu_gauge_->set_center(has_gpu ? QString("%1 °C").arg(gpu_temp, 0, 'f', 0) : "--",
                                gpu_parts.join(" • "));

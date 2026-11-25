@@ -88,7 +88,7 @@ void test_linux_telemetry_reads_mock_sensors() {
 
 void test_nvidia_telemetry_parses_csv_and_handles_timeout() {
     MockProcessRunner runner;
-    runner.next_result = {0, "NVIDIA GeForce RTX 3050 Ti Laptop GPU, 595.104.02, 48, 12.50, 5, 512, 4096, 1450, 37\n", "", false, false};
+    runner.next_result = {0, "NVIDIA GeForce RTX 3050 Ti Laptop GPU, 595.104.02, 48, 12.50, 5, 512, 4096, 1450, 37, 80.00\n", "", false, false};
 
     legion::backends::nvidia::NvidiaTelemetryProvider provider(runner);
     std::vector<legion::core::CapabilityInfo> caps;
@@ -97,11 +97,12 @@ void test_nvidia_telemetry_parses_csv_and_handles_timeout() {
 
     assert(caps.size() == 1);
     assert(caps[0].state == legion::core::CapabilityState::Readable);
-    assert(readings.size() == 7);
+    assert(readings.size() == 8);
     assert(std::abs(readings[0].numeric_value - 48.0) < 0.01);
     assert(std::abs(readings[1].numeric_value - 12.5) < 0.01);
     assert(std::abs(readings[5].numeric_value - 1450.0) < 0.01);
     assert(std::abs(readings[6].numeric_value - 37.0) < 0.01);
+    assert(std::abs(readings[7].numeric_value - 80.0) < 0.01);
 
     // Timeout case
     runner.next_result = {-1, "", "", true, false};

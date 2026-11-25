@@ -33,7 +33,7 @@ void NvidiaTelemetryProvider::collect(std::vector<core::CapabilityInfo>& capabil
     const std::string ts = core::current_timestamp_iso8601();
     const std::vector<std::string> args = {
         "nvidia-smi",
-        "--query-gpu=name,driver_version,temperature.gpu,power.draw,utilization.gpu,memory.used,memory.total,clocks.current.graphics,fan.speed",
+        "--query-gpu=name,driver_version,temperature.gpu,power.draw,utilization.gpu,memory.used,memory.total,clocks.current.graphics,fan.speed,power.max_limit",
         "--format=csv,noheader,nounits"
     };
 
@@ -66,7 +66,7 @@ void NvidiaTelemetryProvider::collect(std::vector<core::CapabilityInfo>& capabil
     }
 
     auto cols = split_csv_line(line);
-    if (cols.size() < 9) {
+    if (cols.size() < 10) {
         capabilities.push_back({
             "nvidia_gpu_telemetry",
             "NVIDIA GPU Telemetry",
@@ -107,6 +107,7 @@ void NvidiaTelemetryProvider::collect(std::vector<core::CapabilityInfo>& capabil
     add_numeric("nvidia.gpu.vram_total", "NVIDIA VRAM Total", cols[6], core::SensorUnit::Megabytes);
     add_numeric("nvidia.gpu.clock_mhz", "NVIDIA GPU Clock", cols[7], core::SensorUnit::Megahertz);
     add_numeric("nvidia.gpu.fan_percent", "NVIDIA GPU Fan", cols[8], core::SensorUnit::Percent);
+    add_numeric("nvidia.gpu.power_limit", "NVIDIA GPU Max Power Limit", cols[9], core::SensorUnit::Watts);
 }
 
 }  // namespace legion::backends::nvidia
