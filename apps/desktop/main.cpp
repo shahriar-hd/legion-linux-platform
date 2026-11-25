@@ -33,11 +33,15 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStringList>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <vector>
 #include <QVector>
 #include <QWidget>
 
@@ -285,26 +289,33 @@ protected:
         painter.setPen(QPen(QColor("#2b3140"), 1.5));
         painter.drawPath(body_path);
 
-        const int rows = 5;
-        const int keys_per_row = 15;
+        static const std::array<std::vector<double>, 5> key_rows = {{
+            {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2},
+            {1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2.5},
+            {1.8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3.2},
+            {2.3, 1, 1, 1, 1, 1, 1, 1, 1, 3.7},
+            {1.2, 1, 1, 1, 5.8, 1, 1, 1, 1, 1}
+        }};
         const double pad = 12.0;
         const double gap = 4.0;
-        const double key_height = (body.height() - pad * 2 - gap * (rows - 1)) / rows;
-        const double key_width = (body.width() - pad * 2 - gap * (keys_per_row - 1)) / keys_per_row;
+        const double key_height =
+            (body.height() - pad * 2 - gap * (static_cast<double>(key_rows.size()) - 1)) /
+            static_cast<double>(key_rows.size());
+        const double unit_width = (body.width() - pad * 2) / 15.0;
         const auto& colors = has_preview_ ? display_colors_ : base_colors_;
 
-        for (int row = 0; row < rows; ++row) {
-            const double y = body.top() + pad + row * (key_height + gap);
-            for (int key = 0; key < keys_per_row; ++key) {
-                const double x = body.left() + pad + key * (key_width + gap);
+        for (std::size_t row = 0; row < key_rows.size(); ++row) {
+            const double y = body.top() + pad + static_cast<double>(row) * (key_height + gap);
+            double x = body.left() + pad;
+            for (double unit : key_rows[row]) {
+                const double key_width = unit * unit_width;
+                const QRectF cap(x + gap / 2.0, y, std::max(1.0, key_width - gap), key_height);
                 const int zone = std::clamp(
-                    static_cast<int>(((x + key_width / 2.0) / body.width()) * 4.0), 0, 3);
-                QColor color = colors[static_cast<std::size_t>(zone)];
-                color = color.darker(210);
+                    static_cast<int>(((cap.center().x() - body.left()) / body.width()) * 4.0), 0, 3);
+                QColor color = colors[static_cast<std::size_t>(zone)].darker(210);
                 if (highlight_zone_ == zone) {
                     color = colors[static_cast<std::size_t>(zone)].lighter(150);
                 }
-                const QRectF cap(x, y, key_width, key_height);
                 QPainterPath cap_path;
                 cap_path.addRoundedRect(cap, 3, 3);
                 painter.fillPath(cap_path, color);
@@ -313,6 +324,7 @@ protected:
                 painter.setPen(QPen(QColor(255, 255, 255, 22), 1));
                 painter.drawLine(QPointF(cap.left() + 2, cap.top() + 1),
                                  QPointF(cap.right() - 2, cap.top() + 1));
+                x += key_width;
             }
         }
 
@@ -321,9 +333,9 @@ protected:
         small.setPointSize(8);
         painter.setFont(small);
         painter.setPen(QColor("#9aa5b1"));
-        const int zone_width = width() / 4;
+        const double zone_width = body.width() / 4.0;
         for (int zone = 0; zone < 4; ++zone) {
-            painter.drawText(QRect(zone * zone_width, height() - 18, zone_width, 16),
+            painter.drawText(QRectF(body.left() + zone * zone_width, height() - 18, zone_width, 16),
                              Qt::AlignCenter, QString("Zone %1").arg(zone + 1));
         }
     }
@@ -389,7 +401,7 @@ public:
         interval_spin_->setDecimals(1);
         interval_spin_->setValue(1.0);
         interval_spin_->setSuffix(" s");
-        interval_spin_->setToolTip("Telemetry refresh interval (0.1 s minimum)");
+        interval_spin_->setToolTip("Telemetry refresh interval. 0.1 s is supported; nvidia-smi may make the effective rate slower.");
         status_label_ = new QLabel("Ready (read-only telemetry)", this);
         status_label_->setStyleSheet("color: #9aa5b1;");
         toolbar->addWidget(refresh_btn);
@@ -400,7 +412,10 @@ public:
         toolbar->addWidget(status_label_);
         root_layout->addLayout(toolbar);
 
-        auto* tabs = new QTabWidget(this);
+        auto* tabs_bar = new QTabBar(this);
+        tabs_bar->setExpanding(true);
+        auto* pages = new QStackedWidget(this);
+        connect(tabs_bar, &QTabBar::currentChanged, pages, &QStackedWidget::setCurrentIndex);
 
         auto* dash_tab = new QWidget(this);
         auto* dash_grid = new QGridLayout(dash_tab);
@@ -417,7 +432,8 @@ public:
         dash_grid->addWidget(battery_gauge_, 1, 1);
         dash_grid->addWidget(memory_gauge_, 2, 0);
         dash_grid->addWidget(fan_gauge_, 2, 1);
-        tabs->addTab(dash_tab, "Dashboard");
+        tabs_bar->addTab("Dashboard");
+        pages->addWidget(dash_tab);
 
         auto* controls_tab = new QWidget(this);
         auto* controls_layout = new QVBoxLayout(controls_tab);
@@ -461,7 +477,8 @@ public:
 
         controls_layout->addWidget(form_group);
         controls_layout->addStretch();
-        tabs->addTab(controls_tab, "Controls");
+        tabs_bar->addTab("Controls");
+        pages->addWidget(controls_tab);
 
         auto* rgb_tab = new QWidget(this);
         auto* rgb_layout = new QVBoxLayout(rgb_tab);
@@ -561,7 +578,8 @@ public:
 
         rgb_layout->addWidget(rgb_group);
         rgb_layout->addStretch();
-        tabs->addTab(rgb_tab, "4-Zone RGB");
+        tabs_bar->addTab("4-Zone RGB");
+        pages->addWidget(rgb_tab);
 
         auto* raw_tab = new QWidget(this);
         auto* raw_layout = new QVBoxLayout(raw_tab);
@@ -575,9 +593,11 @@ public:
         caps_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
         raw_layout->addWidget(sensors_table_);
         raw_layout->addWidget(caps_table_);
-        tabs->addTab(raw_tab, "Sensors & Capabilities");
+        tabs_bar->addTab("Sensors");
+        pages->addWidget(raw_tab);
 
-        root_layout->addWidget(tabs);
+        root_layout->addWidget(tabs_bar);
+        root_layout->addWidget(pages, 1);
         setCentralWidget(central);
 
         timer_ = new QTimer(this);
@@ -1196,5 +1216,19 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     LegionMainWindow window;
     window.show();
+    if (qEnvironmentVariableIsSet("LEGION_SCREENSHOT_PATH")) {
+        QTimer::singleShot(1500, &window, [&window]() {
+            if (auto* tabs = window.findChild<QTabBar*>()) {
+                if (qEnvironmentVariableIsSet("LEGION_SCREENSHOT_TAB")) {
+                    tabs->setCurrentIndex(qEnvironmentVariableIntValue("LEGION_SCREENSHOT_TAB"));
+                }
+            }
+            const QString path = qEnvironmentVariable("LEGION_SCREENSHOT_PATH");
+            if (!path.isEmpty()) {
+                window.grab().save(path);
+            }
+            QCoreApplication::quit();
+        });
+    }
     return app.exec();
 }

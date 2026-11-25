@@ -16,6 +16,7 @@
   - `legion_lighting_tests` — config round-trip, effect aliases, report byte layout, wave direction flags, off/smooth, invalid ranges, frame sampler determinism, HSV conversion.
 - **Read-only CLI:** `./build/legion-cli` — passed. New readings observed: CPU max frequency, storage total/used/percent, NVIDIA graphics clock. NVIDIA fan reported `N/A` (`temporarily_unavailable`).
 - **GUI smoke test:** `QT_QPA_PLATFORM=offscreen timeout 3 ./build/legion-gui` — started without crashing; the Qt offscreen plugin printed only `propagateSizeHints()`.
+- **GUI layout screenshots:** offscreen grabs of Dashboard, Controls, 4-Zone RGB, and Sensors tabs were captured and inspected. The multi-arc gauges, tab bar, keyboard preview, zone buttons, and tables render correctly. The fan gauge reports unavailable because this kernel exposes no hwmon fan inputs.
 - **Daemon one-shot:** `./build/legion-lightd --once` without a config exits cleanly and does not write hardware.
 
 ## Not yet verified
