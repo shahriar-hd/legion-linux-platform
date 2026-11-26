@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Legion Linux Hardware Platform
+Comment=Monitoring, controls and 4-zone RGB for Lenovo Legion laptops
+Exec=/usr/local/bin/legion-gui
+Icon=legion-linux-platform
+Terminal=false
+Categories=System;Monitor;Utility;
+Keywords=Lenovo;Legion;hardware;fan;rgb;battery;monitor;

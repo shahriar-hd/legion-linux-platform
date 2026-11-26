@@ -1,3 +1,4 @@
+#include "legion/backends/lenovo/lenovo_keymap.hpp"
 #include "legion/backends/lenovo/lenovo_rgb.hpp"
 #include "legion/core/lighting.hpp"
 
@@ -5,6 +6,8 @@
 #include <cmath>
 #include <iostream>
 #include <string>
+
+#include <linux/input-event-codes.h>
 
 namespace {
 
@@ -15,6 +18,7 @@ void test_config_round_trip() {
     config.profiles[0].name = "Night Wave";
     config.profiles[0].effect = legion::core::LightingEffect::Wave;
     config.profiles[0].direction = legion::core::WaveDirection::RightToLeft;
+    config.profiles[0].reactive_mode = legion::core::ReactiveMode::Random;
     config.profiles[0].speed = 4;
     config.profiles[0].brightness = 1;
     config.profiles[1].effect = legion::core::LightingEffect::Static;
@@ -30,6 +34,7 @@ void test_config_round_trip() {
     assert(parsed->profiles[0].name == "Night Wave");
     assert(parsed->profiles[0].effect == legion::core::LightingEffect::Wave);
     assert(parsed->profiles[0].direction == legion::core::WaveDirection::RightToLeft);
+    assert(parsed->profiles[0].reactive_mode == legion::core::ReactiveMode::Random);
     assert(parsed->profiles[0].speed == 4);
     assert(parsed->profiles[0].brightness == 1);
     assert(parsed->profiles[1].zones[0].r == 10);
@@ -88,14 +93,14 @@ void test_wave_direction_and_off() {
     auto report = legion::backends::lenovo::build_rgb_report(wave);
     assert(report.valid);
     assert(report.bytes[2] == 0x04);
-    assert(report.bytes[18] == 0x01);
-    assert(report.bytes[19] == 0x00);
+    assert(report.bytes[18] == 0x00);
+    assert(report.bytes[19] == 0x01);
 
     wave.direction = legion::core::WaveDirection::RightToLeft;
     report = legion::backends::lenovo::build_rgb_report(wave);
     assert(report.valid);
-    assert(report.bytes[18] == 0x00);
-    assert(report.bytes[19] == 0x01);
+    assert(report.bytes[18] == 0x01);
+    assert(report.bytes[19] == 0x00);
 
     legion::core::LightingProfile off;
     off.effect = legion::core::LightingEffect::Off;
@@ -174,6 +179,39 @@ void test_frame_sampler() {
     assert(reactive[0].r < profile.zones[0].r);
 }
 
+void test_reactive_render_and_keymap() {
+    legion::core::LightingProfile profile;
+    profile.effect = legion::core::LightingEffect::Reactive;
+    profile.reactive_mode = legion::core::ReactiveMode::Preset;
+    profile.zones = {legion::core::Rgb{255, 0, 0}, legion::core::Rgb{0, 255, 0},
+                     legion::core::Rgb{0, 0, 255}, legion::core::Rgb{255, 255, 0}};
+
+    legion::core::ReactiveFlashState state;
+    legion::core::reactive_flash(state, 1, profile.zones[1], 1.0);
+    const auto frame = legion::core::reactive_render(state, profile);
+    assert(frame[1].g > 200);
+    assert(frame[0].r < 40);
+
+    legion::core::reactive_decay(state, 1.4);
+    const auto faded = legion::core::reactive_render(state, profile);
+    assert(faded[1].g < frame[1].g);
+
+    profile.reactive_mode = legion::core::ReactiveMode::Random;
+    const auto random_color = legion::core::reactive_color_for(profile, 0, 12345);
+    assert(random_color.r + random_color.g + random_color.b > 0);
+
+    using legion::backends::lenovo::legion_key_to_zone;
+    assert(legion_key_to_zone(KEY_A) == 0);
+    assert(legion_key_to_zone(KEY_F5) == 0);
+    assert(legion_key_to_zone(KEY_O) == 1);
+    assert(legion_key_to_zone(KEY_F10) == 1);
+    assert(legion_key_to_zone(KEY_ENTER) == 2);
+    assert(legion_key_to_zone(KEY_UP) == 2);
+    assert(legion_key_to_zone(KEY_KP5) == 3);
+    assert(legion_key_to_zone(KEY_KPENTER) == 3);
+    assert(legion_key_to_zone(-999) == -1);
+}
+
 void test_hsv() {
     const auto red = legion::core::hsv_to_rgb(0.0, 1.0, 1.0);
     assert(red.r == 255 && red.g == 0 && red.b == 0);
@@ -192,6 +230,7 @@ int main() {
     test_wave_direction_and_off();
     test_invalid_reports();
     test_frame_sampler();
+    test_reactive_render_and_keymap();
     test_hsv();
     std::cout << "All lighting tests passed.\n";
     return 0;

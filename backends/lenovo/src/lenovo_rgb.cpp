@@ -114,9 +114,9 @@ RgbReport build_rgb_report(const core::LightingProfile& profile) {
         case core::LightingEffect::Wave:
             report[2] = 0x04;
             if (profile.direction == core::WaveDirection::LeftToRight) {
-                report[18] = 0x01;
-            } else {
                 report[19] = 0x01;
+            } else {
+                report[18] = 0x01;
             }
             break;
         case core::LightingEffect::Smooth:

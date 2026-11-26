@@ -16,6 +16,7 @@ The project separates read-only telemetry from privileged writes, keeps the GUI 
   - **Memory** — usage and used/total GiB.
   - **Fans** — maximum RPM and sensor count from hwmon.
 - User-selectable refresh interval from **0.1 s to 60 s** (single-shot scheduling prevents overlap).
+- A **°C / °F** unit switch for the gauges and the sensor table.
 - Full sensor and capability tables with source and state.
 
 ### Lenovo controls
@@ -30,11 +31,19 @@ The project separates read-only telemetry from privileged writes, keeps the GUI 
 - **Native firmware effects** written to the ITE 8295 controller:
   - Off, Static, Breathing, Wave (left-to-right / right-to-left), Smooth (hue cycle).
 - **Software effects** animated by `legion-lightd` (or by the app when the daemon is not running):
-  - Heartbeat, Rainbow, Dance/disco, Random, Reactive (preview click-to-flash).
-- Painted keyboard preview with clickable zones and colour pickers.
+  - Heartbeat, Rainbow (a continuous, seamless 4-zone hue shift), Dance/disco, Random, Reactive.
+- **Reactive** flashes the zone under each physical key (preset per-zone colours or a random colour per press) with a smooth fade. It needs read access to `/dev/input` (see below).
+- Painted keyboard preview with clickable zones, preset swatches and a full colour picker.
+- **Realtime colour preview**: while editing a Static profile, colour changes can be written to the keyboard immediately.
 - The daemon re-applies the saved profile at login and after suspend/resume (toggle **Apply this profile at login** in the RGB tab).
 
 Lenovo Vantage's own four hardware slots are controlled by the EC and are **not** programmable through the documented HID protocol. This app therefore keeps four equivalent userspace profiles instead of pretending to edit Vantage's slots.
+
+## Screenshots
+
+| Dashboard | 4-zone RGB keyboard |
+| --- | --- |
+| ![Dashboard](docs/assets/Screenshot-Dashboard.png) | ![Backlight](docs/assets/Screenshot-Backlight.png) |
 
 ## Build
 
@@ -70,7 +79,9 @@ sudo ./packaging/install-service.sh
 ./packaging/install-user-service.sh
 ```
 
-The first command installs the helper/daemon, the udev rule and the Polkit rule. The second installs and enables `legion-lightd.service` for your desktop user. Reconnect the keyboard or reboot after installing the udev rule.
+The first command installs the helper, daemon and GUI, the RGB udev rule, the reactive keyboard-input udev rule, the Polkit rule, the icon and the desktop entry. The second installs and enables `legion-lightd.service` for your desktop user. Reconnect the keyboard or reboot after installing the udev rules.
+
+> **Reactive input note.** `71-legion-keyboard-input.rules` grants the logged-in user read access to the internal keyboard event device so keypresses can flash lighting zones. This is the same capability as any input-reading utility; remove the rule to disable reactive physical-key input without affecting the other features.
 
 Remove everything with:
 
@@ -102,6 +113,7 @@ Validate a profile without touching hardware:
 - A successful HID write or sysfs write is reported as **write reported**, not as physical success. The physical keyboard must be confirmed by the user.
 - CPU package power needs privileged RAPL access on many systems; when `energy_uj` is not readable the CPU gauge falls back to frequency and does not claim power telemetry.
 - Fan gauges appear only when the kernel exposes hwmon fan inputs. On this machine the stock kernel exposes no fan sensors; LenovoLegionLinux/`legion_laptop` would add them.
+- Reactive lighting reads the keyboard event device read-only and never grabs it, so normal typing is unaffected.
 - Software effects run at a bounded frame rate and stop on write failure.
 
 ## Supported hardware
@@ -116,9 +128,13 @@ The RGB backend also lists the common ITE 8295 product IDs (`c955`, `c963`, `c96
 
 ```text
 core/        domain types, lighting model, config persistence, safe I/O
-backends/    linux sysfs, NVIDIA, Lenovo telemetry, ITE 8295 RGB
+backends/    linux sysfs, evdev keyboard input, NVIDIA, Lenovo telemetry, ITE 8295 RGB, key map
 apps/        GUI, CLI, helper, lighting daemon
-packaging/   udev, Polkit, systemd user unit, installers
+packaging/   udev, Polkit, systemd user unit, desktop entry, installers
 tests/       mocked telemetry and lighting protocol tests
-docs/        decisions, compatibility matrix, test results, protocol notes
+docs/        decisions, compatibility matrix, test results, protocol notes, logo
 ```
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [LICENSE](LICENSE) for the full text.

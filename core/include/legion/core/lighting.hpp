@@ -31,12 +31,18 @@ enum class WaveDirection {
     RightToLeft
 };
 
+enum class ReactiveMode {
+    Preset,
+    Random
+};
+
 struct LightingProfile {
     std::string name = "Profile";
     LightingEffect effect = LightingEffect::Static;
     int speed = 2;
     int brightness = 2;
     WaveDirection direction = WaveDirection::LeftToRight;
+    ReactiveMode reactive_mode = ReactiveMode::Preset;
     std::array<Rgb, 4> zones{};
 };
 
@@ -49,8 +55,10 @@ struct LightingConfig {
 
 std::string to_string(LightingEffect effect);
 std::string to_string(WaveDirection direction);
+std::string to_string(ReactiveMode mode);
 bool parse_lighting_effect(const std::string& text, LightingEffect& out);
 bool parse_wave_direction(const std::string& text, WaveDirection& out);
+bool parse_reactive_mode(const std::string& text, ReactiveMode& out);
 
 bool is_hardware_effect(LightingEffect effect);
 bool is_software_effect(LightingEffect effect);
@@ -64,6 +72,25 @@ Rgb hsv_to_rgb(double hue, double saturation, double value);
 std::array<Rgb, 4> sample_lighting_frame(LightingEffect effect,
                                          const LightingProfile& profile,
                                          double time_seconds);
+
+// Stateful reactive effect: keys light up the zone they belong to and fade out.
+struct ReactiveFlashState {
+    std::array<double, 4> intensity{};
+    std::array<Rgb, 4> color{};
+    double last_time = 0.0;
+
+    bool active() const {
+        for (double value : intensity) {
+            if (value > 0.01) return true;
+        }
+        return false;
+    }
+};
+
+void reactive_decay(ReactiveFlashState& state, double now_seconds);
+void reactive_flash(ReactiveFlashState& state, int zone, Rgb color, double now_seconds);
+Rgb reactive_color_for(const LightingProfile& profile, int zone, std::uint32_t seed);
+std::array<Rgb, 4> reactive_render(const ReactiveFlashState& state, const LightingProfile& profile);
 
 std::string default_lighting_config_path();
 std::string default_lightd_socket_path();

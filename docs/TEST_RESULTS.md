@@ -27,3 +27,12 @@
 - Passwordless Polkit behaviour after installing the rule.
 - CPU package power (RAPL is root-only on this machine).
 - **Daemon dry-run:** `./build/legion-lightd --config /tmp/legion-test.conf --once --dry-run` — parsed a Rainbow profile and logged the intended apply without touching hardware.
+
+## 2026-11-25 — Temperature units, reactive modes, keymap, logo
+- **Build:** `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build` — passed with no warnings.
+- **Unit tests:** `ctest --test-dir build --output-on-failure` — **2/2 passed**. `legion_lighting_tests` now also covers:
+  - reactive preset/random render and decay,
+  - the corrected Wave direction bytes (LTR → byte 19, RTL → byte 18),
+  - the Lenovo key-to-zone map (A/F5 zone 0, O/F10 zone 1, Enter/Up zone 2, keypad zone 3, unknown → -1).
+- **GUI:** offscreen run of every tab started and exited cleanly. The `logo.png` Qt resource compiled into the GUI.
+- **Not verified:** physical reactive flashes (needs the keyboard-input rule), realtime colour preview on hardware, and the F/C toggle appearance.

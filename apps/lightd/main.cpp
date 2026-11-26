@@ -1,6 +1,10 @@
 #include "legion/backends/lenovo/lenovo_rgb.hpp"
+#include "legion/backends/lenovo/lenovo_keymap.hpp"
+#include "legion/backends/linux/keyboard_input.hpp"
 #include "legion/core/lighting.hpp"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -10,7 +14,9 @@
 #include <ctime>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <poll.h>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -22,6 +28,10 @@ namespace {
 
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_reload_requested{false};
+std::atomic<bool> g_preview_pending{false};
+std::mutex g_preview_mutex;
+std::array<legion::core::Rgb, 4> g_preview_zones{};
+int g_preview_brightness = 2;
 
 void handle_signal(int) {
     g_running.store(false);
@@ -136,6 +146,33 @@ private:
                     const char reply[] = "ok\n";
                     if (::write(client, reply, sizeof(reply) - 1) < 0) {}
 
+                } else if (command.rfind("preview ", 0) == 0) {
+                    std::istringstream iss(command.substr(8));
+                    int values[13] = {0};
+                    bool ok = true;
+                    for (int i = 0; i < 13; ++i) {
+                        if (!(iss >> values[i])) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if (ok) {
+                        std::lock_guard<std::mutex> lock(g_preview_mutex);
+                        for (int zone = 0; zone < 4; ++zone) {
+                            g_preview_zones[static_cast<std::size_t>(zone)] = {
+                                static_cast<std::uint8_t>(std::clamp(values[zone * 3 + 0], 0, 255)),
+                                static_cast<std::uint8_t>(std::clamp(values[zone * 3 + 1], 0, 255)),
+                                static_cast<std::uint8_t>(std::clamp(values[zone * 3 + 2], 0, 255))};
+                        }
+                        g_preview_brightness = std::clamp(values[12], 1, 2);
+                        g_preview_pending.store(true);
+                        const char reply[] = "ok\n";
+                        if (::write(client, reply, sizeof(reply) - 1) < 0) {}
+                    } else {
+                        const char reply[] = "bad\n";
+                        if (::write(client, reply, sizeof(reply) - 1) < 0) {}
+                    }
+
                 } else if (command == "ping") {
                     const char reply[] = "ok\n";
                     if (::write(client, reply, sizeof(reply) - 1) < 0) {}
@@ -201,12 +238,16 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, handle_signal);
 
     auto session = std::make_unique<legion::backends::lenovo::RgbSession>();
+    legion::backends::linux_input::KeyboardInput keyboard;
+    legion::core::ReactiveFlashState reactive_state;
     legion::core::LightingConfig config;
     bool have_config = false;
     bool armed = false;
     std::int64_t last_mtime = 0;
     double animation_start = steady_seconds();
     std::string last_error;
+    std::string last_keyboard_error;
+    double last_keyboard_attempt = 0.0;
 
     auto load_config = [&]() {
         const auto text = legion::core::read_text_file(options.config_path);
@@ -299,6 +340,28 @@ int main(int argc, char* argv[]) {
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
             continue;
         }
+
+        if (g_preview_pending.exchange(false)) {
+            std::array<legion::core::Rgb, 4> zones{};
+            int brightness = 2;
+            {
+                std::lock_guard<std::mutex> lock(g_preview_mutex);
+                zones = g_preview_zones;
+                brightness = g_preview_brightness;
+            }
+            if (!session->is_open()) {
+                std::string error;
+                session->open(error);
+            }
+            if (session->is_open()) {
+                std::string error;
+                session->apply_zones(zones, brightness, error);
+            }
+            last_hardware_apply = std::chrono::steady_clock::now();
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            continue;
+        }
+
         if (legion::core::is_software_effect(profile.effect)) {
             if (!session->is_open()) {
                 std::string error;
@@ -312,7 +375,36 @@ int main(int argc, char* argv[]) {
                 }
             }
             const double elapsed = steady_seconds() - animation_start;
-            const auto frame = legion::core::sample_lighting_frame(profile.effect, profile, elapsed);
+            std::array<legion::core::Rgb, 4> frame{};
+            if (profile.effect == legion::core::LightingEffect::Reactive) {
+                if (!keyboard.is_open() && elapsed - last_keyboard_attempt > 2.0) {
+                    last_keyboard_attempt = elapsed;
+                    std::string key_error;
+                    if (!keyboard.open(key_error)) {
+                        if (key_error != last_keyboard_error) {
+                            log_line("reactive input unavailable: " + key_error);
+                            last_keyboard_error = key_error;
+                        }
+                    } else {
+                        log_line("reactive input reading " + keyboard.device_summary());
+                        last_keyboard_error.clear();
+                    }
+                }
+                keyboard.poll([&](int code, bool pressed) {
+                    if (!pressed) return;
+                    const int zone = legion::backends::lenovo::legion_key_to_zone(code);
+                    if (zone < 0) return;
+                    const auto seed = static_cast<std::uint32_t>(elapsed * 1000.0) +
+                                      static_cast<std::uint32_t>(code) * 2654435761U;
+                    const legion::core::Rgb color =
+                        legion::core::reactive_color_for(profile, zone, seed);
+                    legion::core::reactive_flash(reactive_state, zone, color, elapsed);
+                });
+                legion::core::reactive_decay(reactive_state, elapsed);
+                frame = legion::core::reactive_render(reactive_state, profile);
+            } else {
+                frame = legion::core::sample_lighting_frame(profile.effect, profile, elapsed);
+            }
             std::string error;
             if (!session->apply_zones(frame, profile.brightness, error)) {
                 if (error != last_error) {

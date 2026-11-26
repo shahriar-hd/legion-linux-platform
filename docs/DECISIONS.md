@@ -40,3 +40,18 @@
 - **Decision:** Replace small single-value gauges with large concentric multi-arc gauges, one per component, and let the user choose a 0.1–60 s refresh interval.
 - **Rationale:** Matches the requested Vantage/Afterburner-style presentation while keeping metric semantics explicit (colour + label + unit per ring).
 - **Scheduling:** The refresh timer is single-shot and rescheduled after collection, so a slow `nvidia-smi` call cannot pile up.
+
+## 9. Reactive lighting reads the keyboard through evdev
+- **Decision:** Implement reactive lighting in the userspace daemon (and the GUI when the daemon is not running) by reading the internal keyboard event device read-only and mapping key codes to the four physical zones.
+- **Rationale:** The user asked for key presses to flash the zone they occur in. The kernel input subsystem is the correct source; no kernel driver is needed and the device is never grabbed, so typing is unaffected.
+- **Permissions:** A `71-legion-keyboard-input.rules` `uaccess` rule (or membership of the `input` group) is required. This is a deliberate, documented trade-off: the session user could otherwise already read input events through standard tools. Removing the rule disables only reactive physical-key input.
+- **Model-specific mapping:** The key-to-zone table is US-ANSI + numpad for the Legion 5 Pro 16" and lives in `backends/lenovo/src/lenovo_keymap.cpp`. It must be re-validated for other keyboards.
+- **Failure handling:** If the event device is unavailable the daemon logs once and keeps animating everything else; it never fabricates key events.
+
+## 10. Realtime colour preview over the daemon socket
+- **Decision:** The GUI sends a `preview` socket command with the current static zones for immediate display, and writes directly only when the daemon is not running.
+- **Rationale:** Writing directly while the daemon holds the active profile can be overwritten by the daemon's periodic re-apply. Routing through the daemon keeps a single writer and refreshes `last_hardware_apply` so the saved profile is not forced back mid-edit.
+
+## 11. Wave direction byte mapping
+- **Decision:** Left-to-right sets report byte 19 and right-to-left sets byte 18.
+- **Rationale:** The user observed that the previous mapping produced the opposite physical direction.

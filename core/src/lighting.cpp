@@ -54,6 +54,12 @@ Rgb scale_color(Rgb color, double factor) {
             static_cast<std::uint8_t>(std::lround(color.b * factor))};
 }
 
+Rgb add_clamp(Rgb a, Rgb b) {
+    return {clamp_byte(static_cast<int>(a.r) + static_cast<int>(b.r)),
+            clamp_byte(static_cast<int>(a.g) + static_cast<int>(b.g)),
+            clamp_byte(static_cast<int>(a.b) + static_cast<int>(b.b))};
+}
+
 Rgb average_color(const std::array<Rgb, 4>& zones) {
     double r = 0.0;
     double g = 0.0;
@@ -120,6 +126,10 @@ std::string to_string(WaveDirection direction) {
     return direction == WaveDirection::LeftToRight ? "ltr" : "rtl";
 }
 
+std::string to_string(ReactiveMode mode) {
+    return mode == ReactiveMode::Random ? "random" : "preset";
+}
+
 bool parse_lighting_effect(const std::string& text, LightingEffect& out) {
     const std::string value = trim(text);
     if (value == "off") out = LightingEffect::Off;
@@ -144,6 +154,19 @@ bool parse_wave_direction(const std::string& text, WaveDirection& out) {
     }
     if (value == "rtl" || value == "right-to-left" || value == "left") {
         out = WaveDirection::RightToLeft;
+        return true;
+    }
+    return false;
+}
+
+bool parse_reactive_mode(const std::string& text, ReactiveMode& out) {
+    const std::string value = trim(text);
+    if (value == "preset" || value == "static" || value == "color") {
+        out = ReactiveMode::Preset;
+        return true;
+    }
+    if (value == "random" || value == "rainbow") {
+        out = ReactiveMode::Random;
         return true;
     }
     return false;
@@ -197,6 +220,7 @@ std::string serialize_lighting_config(const LightingConfig& config) {
         out << "profile." << i << ".speed=" << clamp_int(profile.speed, 1, 4) << "\n";
         out << "profile." << i << ".brightness=" << clamp_int(profile.brightness, 1, 2) << "\n";
         out << "profile." << i << ".direction=" << to_string(profile.direction) << "\n";
+        out << "profile." << i << ".reactive=" << to_string(profile.reactive_mode) << "\n";
         for (std::size_t z = 0; z < profile.zones.size(); ++z) {
             const auto& zone = profile.zones[z];
             out << "profile." << i << ".zone" << z << "="
@@ -266,6 +290,9 @@ std::optional<LightingConfig> parse_lighting_config(const std::string& text) {
             } else if (field == "direction") {
                 WaveDirection direction = profile.direction;
                 if (parse_wave_direction(value, direction)) profile.direction = direction;
+            } else if (field == "reactive") {
+                ReactiveMode mode = profile.reactive_mode;
+                if (parse_reactive_mode(value, mode)) profile.reactive_mode = mode;
             } else if (field.rfind("zone", 0) == 0) {
                 try {
                     const int zone_index = std::stoi(field.substr(4));
@@ -340,7 +367,7 @@ std::array<Rgb, 4> sample_lighting_frame(LightingEffect effect,
             break;
         }
         case LightingEffect::Wave: {
-            const double sign = profile.direction == WaveDirection::LeftToRight ? 1.0 : -1.0;
+            const double sign = profile.direction == WaveDirection::LeftToRight ? -1.0 : 1.0;
             for (std::size_t i = 0; i < frame.size(); ++i) {
                 const double hue = t * rate * 0.35 + sign * static_cast<double>(i) * 0.18;
                 frame[i] = hsv_to_rgb(hue, 1.0, 1.0);
@@ -366,9 +393,12 @@ std::array<Rgb, 4> sample_lighting_frame(LightingEffect effect,
             break;
         }
         case LightingEffect::Rainbow: {
+            // A seamless 4-zone slice of the hue wheel that shifts continuously.
+            // The 1/8 spacing matches the red|orange|yellow|green|cyan|blue|purple cycle.
+            const double shift = t * rate * 0.16;
+            const double spacing = 0.125;
             for (std::size_t i = 0; i < frame.size(); ++i) {
-                const double hue = t * rate * 0.25 + static_cast<double>(i) * 0.25;
-                frame[i] = hsv_to_rgb(hue, 1.0, 1.0);
+                frame[i] = hsv_to_rgb(shift - static_cast<double>(i) * spacing, 1.0, 1.0);
             }
             break;
         }
@@ -392,10 +422,54 @@ std::array<Rgb, 4> sample_lighting_frame(LightingEffect effect,
         }
         case LightingEffect::Reactive: {
             for (std::size_t i = 0; i < frame.size(); ++i) {
-                frame[i] = scale_color(profile.zones[i], 0.18);
+                frame[i] = scale_color(profile.zones[i], 0.06);
             }
             break;
         }
+    }
+    return frame;
+}
+
+void reactive_decay(ReactiveFlashState& state, double now_seconds) {
+    if (state.last_time == 0.0) {
+        state.last_time = now_seconds;
+        return;
+    }
+    double dt = now_seconds - state.last_time;
+    if (dt < 0.0) dt = 0.0;
+    state.last_time = now_seconds;
+    const double factor = std::exp(-dt / 0.16);
+    for (double& intensity : state.intensity) {
+        intensity *= factor;
+        if (intensity < 0.002) intensity = 0.0;
+    }
+}
+
+void reactive_flash(ReactiveFlashState& state, int zone, Rgb color, double now_seconds) {
+    if (zone < 0 || zone > 3) return;
+    reactive_decay(state, now_seconds);
+    state.intensity[static_cast<std::size_t>(zone)] = 1.0;
+    state.color[static_cast<std::size_t>(zone)] = color;
+}
+
+Rgb reactive_color_for(const LightingProfile& profile, int zone, std::uint32_t seed) {
+    if (profile.reactive_mode == ReactiveMode::Preset) {
+        if (zone < 0 || zone > 3) return {255, 255, 255};
+        const Rgb preset = profile.zones[static_cast<std::size_t>(zone)];
+        if (preset.r + preset.g + preset.b == 0) return {255, 255, 255};
+        return preset;
+    }
+    const double hue = static_cast<double>(hash32(seed) % 3600U) / 3600.0;
+    return hsv_to_rgb(hue, 1.0, 1.0);
+}
+
+std::array<Rgb, 4> reactive_render(const ReactiveFlashState& state, const LightingProfile& profile) {
+    std::array<Rgb, 4> frame{};
+    for (int i = 0; i < 4; ++i) {
+        const std::size_t index = static_cast<std::size_t>(i);
+        const Rgb base = scale_color(profile.zones[index], 0.06);
+        const Rgb flash = scale_color(state.color[index], std::clamp(state.intensity[index], 0.0, 1.0));
+        frame[index] = add_clamp(base, flash);
     }
     return frame;
 }

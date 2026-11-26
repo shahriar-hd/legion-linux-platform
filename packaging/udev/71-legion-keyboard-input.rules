@@ -1,0 +1,11 @@
+# Reactive lighting input.
+#
+# Grants the active desktop user read access to the internal keyboard event
+# device so key presses can flash the four RGB zones. Reading is non-exclusive,
+# so normal typing is unaffected.
+#
+# Security note: this allows processes running as the logged-in user to observe
+# keyboard events (the same capability as any input-reading utility). Remove
+# this file and run `sudo udevadm control --reload-rules` to disable reactive
+# physical-key input; the rest of the lighting features keep working.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"

@@ -9,6 +9,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HELPER="${ROOT_DIR}/build/legion-helper"
 LIGHTD="${ROOT_DIR}/build/legion-lightd"
+GUI="${ROOT_DIR}/build/legion-gui"
 
 if [[ ! -x "${HELPER}" || ! -x "${LIGHTD}" ]]; then
     echo "Build the project first: cmake -B build -G Ninja && cmake --build build" >&2
@@ -17,12 +18,27 @@ fi
 
 install -m 0755 "${HELPER}" /usr/local/bin/legion-helper
 install -m 0755 "${LIGHTD}" /usr/local/bin/legion-lightd
+if [[ -x "${GUI}" ]]; then
+    install -m 0755 "${GUI}" /usr/local/bin/legion-gui
+fi
 install -D -m 0644 "${ROOT_DIR}/packaging/udev/60-legion-rgb.rules" /etc/udev/rules.d/60-legion-rgb.rules
+install -D -m 0644 "${ROOT_DIR}/packaging/udev/71-legion-keyboard-input.rules" /etc/udev/rules.d/71-legion-keyboard-input.rules
 install -D -m 0644 "${ROOT_DIR}/packaging/polkit/50-legion-helper.rules" /etc/polkit-1/rules.d/50-legion-helper.rules
 install -D -m 0644 "${ROOT_DIR}/README.md" /usr/local/share/doc/legion-linux-platform/README.md
 
+if [[ -f "${ROOT_DIR}/docs/assets/logo.png" ]]; then
+    install -D -m 0644 "${ROOT_DIR}/docs/assets/logo.png" \
+        /usr/share/icons/hicolor/256x256/apps/legion-linux-platform.png
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+fi
+if [[ -f "${ROOT_DIR}/packaging/desktop/legion-linux-platform.desktop" ]]; then
+    install -D -m 0644 "${ROOT_DIR}/packaging/desktop/legion-linux-platform.desktop" \
+        /usr/share/applications/legion-linux-platform.desktop
+fi
+
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=hidraw
+udevadm trigger --subsystem-match=input
 
 TARGET_USER="${SUDO_USER:-}"
 if [[ -z "${TARGET_USER}" || "${TARGET_USER}" == "root" ]]; then
@@ -48,3 +64,6 @@ echo "System files installed and user service copied for ${TARGET_USER}."
 echo "Enable it from ${TARGET_USER}'s desktop session with:"
 echo "  systemctl --user daemon-reload"
 echo "  systemctl --user enable --now legion-lightd.service"
+echo ""
+echo "Note: 71-legion-keyboard-input.rules grants the session user read access to"
+echo "the keyboard event device so reactive lighting can flash zones on keypress."

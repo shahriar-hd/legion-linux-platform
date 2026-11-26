@@ -1,5 +1,7 @@
 #include "legion/backends/lenovo/lenovo_rgb.hpp"
+#include "legion/backends/lenovo/lenovo_keymap.hpp"
 #include "legion/backends/lenovo/lenovo_telemetry.hpp"
+#include "legion/backends/linux/keyboard_input.hpp"
 #include "legion/backends/linux/linux_telemetry.hpp"
 #include "legion/backends/nvidia/nvidia_telemetry.hpp"
 #include "legion/core/interfaces.hpp"
@@ -22,6 +24,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QLabel>
 #include <QMainWindow>
 #include <QMessageBox>
@@ -73,6 +76,10 @@ QString format_value(double value, int decimals) {
     return QString::number(value, 'f', decimals);
 }
 
+double celsius_to_fahrenheit(double celsius) {
+    return celsius * 9.0 / 5.0 + 32.0;
+}
+
 QColor to_qcolor(const legion::core::Rgb& rgb) {
     return QColor(rgb.r, rgb.g, rgb.b);
 }
@@ -99,7 +106,7 @@ std::string effect_label(legion::core::LightingEffect effect) {
     return "Static";
 }
 
-bool notify_lightd() {
+bool send_lightd_command(const std::string& command) {
     const std::string path = legion::core::default_lightd_socket_path();
     const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return false;
@@ -119,15 +126,19 @@ bool notify_lightd() {
         ::close(fd);
         return false;
     }
-    const char message[] = "reload\n";
-    if (::write(fd, message, sizeof(message) - 1) < 0) {
+    const std::string message = command + "\n";
+    if (::write(fd, message.data(), message.size()) < 0) {
         ::close(fd);
         return false;
     }
     char reply[32] = {0};
     const ssize_t count = ::read(fd, reply, sizeof(reply) - 1);
     ::close(fd);
-    return count > 0;
+    return count > 0 && std::string(reply, static_cast<std::size_t>(count)).rfind("ok", 0) == 0;
+}
+
+bool notify_lightd() {
+    return send_lightd_command("reload");
 }
 
 struct GaugeArc {
@@ -165,8 +176,8 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
 
-        const int legend_height = arcs_.isEmpty() ? 0 : 32;
-        const int title_height = 22;
+        const int legend_height = arcs_.isEmpty() ? 0 : 30;
+        const int title_height = 28;
         const int padding = 12;
         const int available = height() - legend_height - title_height - padding * 2;
         const int side = std::max(80, std::min(width() - padding * 2, available));
@@ -206,31 +217,39 @@ protected:
 
         if (!arcs_.isEmpty()) {
             const int legend_y = height() - title_height - legend_height;
-            const int cell_width = std::max(1, width() / static_cast<int>(arcs_.size()));
-            font.setPointSize(8);
+            font.setPointSize(9);
             font.setBold(false);
             painter.setFont(font);
-            for (int i = 0; i < arcs_.size(); ++i) {
-                const auto& arc = arcs_[i];
-                const int x = i * cell_width + 8;
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(arc.color);
-                painter.drawEllipse(QPointF(x + 4, legend_y + 9), 4, 4);
+            const QFontMetrics metrics(font);
+            const int dot = 8;
+            const int item_gap = 16;
+            QVector<int> widths;
+            int total = 0;
+            for (const auto& arc : arcs_) {
                 const QString value_text = arc.valid
                     ? format_value(arc.value, arc.decimals) + " " + arc.unit
                     : QString("--");
-                QString text = arc.label + " " + value_text;
-                const int max_width = cell_width - 24;
-                if (max_width > 10) {
-                    text = QFontMetrics(font).elidedText(text, Qt::ElideRight, max_width);
-                }
+                widths.append(dot + 6 + metrics.horizontalAdvance(arc.label + " " + value_text));
+                total += widths.last();
+            }
+            total += item_gap * (arcs_.size() - 1);
+            int x = std::max(6, (width() - total) / 2);
+            for (int i = 0; i < arcs_.size(); ++i) {
+                const auto& arc = arcs_[i];
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(arc.color);
+                painter.drawEllipse(QPointF(x + dot / 2.0, legend_y + 9), 4, 4);
+                const QString value_text = arc.valid
+                    ? format_value(arc.value, arc.decimals) + " " + arc.unit
+                    : QString("--");
                 painter.setPen(QColor("#cbd2d9"));
-                painter.drawText(QRect(x + 13, legend_y, cell_width - 16, 18),
-                                 Qt::AlignVCenter | Qt::AlignLeft, text);
+                painter.drawText(QRect(x + dot + 6, legend_y, widths[i], 18),
+                                 Qt::AlignVCenter | Qt::AlignLeft, arc.label + " " + value_text);
+                x += widths[i] + item_gap;
             }
         }
 
-        font.setPointSize(11);
+        font.setPointSize(16);
         font.setBold(true);
         painter.setFont(font);
         painter.setPen(QColor("#00d4ff"));
@@ -365,6 +384,7 @@ public:
           lenovo_provider_(*sysfs_),
           nvidia_provider_(*runner_) {
         setWindowTitle("Legion Linux Hardware Platform");
+        setWindowIcon(QIcon(":/logo.png"));
         resize(1360, 900);
         setStyleSheet(
             "QMainWindow, QWidget { background-color: #12141a; color: #e4e7eb; }"
@@ -401,12 +421,17 @@ public:
         interval_spin_->setValue(1.0);
         interval_spin_->setSuffix(" s");
         interval_spin_->setToolTip("Telemetry refresh interval. 0.1 s is supported; nvidia-smi may make the effective rate slower.");
+        temp_unit_combo_ = new QComboBox(this);
+        temp_unit_combo_->addItems({"°C", "°F"});
+        temp_unit_combo_->setToolTip("Temperature unit");
         status_label_ = new QLabel("Ready (read-only telemetry)", this);
         status_label_->setStyleSheet("color: #9aa5b1;");
         toolbar->addWidget(refresh_btn);
         toolbar->addWidget(auto_refresh_cb_);
         toolbar->addWidget(new QLabel("Interval:", this));
         toolbar->addWidget(interval_spin_);
+        toolbar->addWidget(new QLabel("Temp:", this));
+        toolbar->addWidget(temp_unit_combo_);
         toolbar->addStretch();
         toolbar->addWidget(status_label_);
         root_layout->addLayout(toolbar);
@@ -504,16 +529,38 @@ public:
         auto* rgb_body = new QHBoxLayout();
         auto* keyboard_column = new QVBoxLayout();
         keyboard_ = new KeyboardWidget(this);
-        keyboard_->set_zone_click_handler([this](int zone) { choose_zone_color(zone); });
+        keyboard_->set_zone_click_handler([this](int zone) { select_zone(zone); });
         keyboard_column->addWidget(keyboard_);
         auto* zone_row = new QHBoxLayout();
         for (int zone = 0; zone < 4; ++zone) {
             zone_buttons_[static_cast<std::size_t>(zone)] = new QPushButton(QString("Zone %1").arg(zone + 1), this);
             zone_row->addWidget(zone_buttons_[static_cast<std::size_t>(zone)]);
             connect(zone_buttons_[static_cast<std::size_t>(zone)], &QPushButton::clicked, this,
-                    [this, zone]() { choose_zone_color(zone); });
+                    [this, zone]() { select_zone(zone); });
         }
         keyboard_column->addLayout(zone_row);
+
+        auto* palette_row = new QHBoxLayout();
+        palette_row->addWidget(new QLabel("Presets:", this));
+        const std::array<const char*, 12> preset_colors = {
+            "#ff0000", "#ff7f00", "#ffd400", "#00e676", "#00d4ff", "#0066ff",
+            "#8a2be2", "#ff2d95", "#ffffff", "#ffb3c1", "#00ffd5", "#7c4dff"};
+        for (const char* hex : preset_colors) {
+            auto* swatch = new QPushButton(this);
+            swatch->setFixedSize(26, 26);
+            swatch->setToolTip(hex);
+            swatch->setStyleSheet(
+                QString("background-color: %1; border: 1px solid #2b3140; border-radius: 5px;").arg(hex));
+            const QColor color(hex);
+            connect(swatch, &QPushButton::clicked, this, [this, color]() { apply_palette_color(color); });
+            palette_row->addWidget(swatch);
+        }
+        auto* custom_btn = new QPushButton("Custom…", this);
+        connect(custom_btn, &QPushButton::clicked, this, [this]() { open_custom_color(); });
+        palette_row->addWidget(custom_btn);
+        palette_row->addStretch();
+        keyboard_column->addLayout(palette_row);
+
         rgb_body->addLayout(keyboard_column, 3);
 
         auto* rgb_form = new QFormLayout();
@@ -550,6 +597,14 @@ public:
         rgb_direction_combo_->addItems({"Left to right", "Right to left"});
         rgb_form->addRow("Wave direction:", rgb_direction_combo_);
 
+        reactive_color_combo_ = new QComboBox(this);
+        reactive_color_combo_->addItems({"Preset colors", "Random colors"});
+        rgb_form->addRow("Reactive color:", reactive_color_combo_);
+
+        realtime_cb_ = new QCheckBox("Realtime color preview", this);
+        realtime_cb_->setToolTip("Write static zone colors to the keyboard immediately while editing.");
+        rgb_form->addRow("", realtime_cb_);
+
         rgb_kind_label_ = new QLabel(this);
         rgb_kind_label_->setWordWrap(true);
         rgb_kind_label_->setStyleSheet("color: #9aa5b1;");
@@ -567,9 +622,9 @@ public:
             "Native firmware effects: Off, Static, Breathing, Wave, Smooth. Heartbeat, Rainbow, Dance, "
             "Random and Reactive are synthesized in software by legion-lightd (or by this app when the daemon "
             "is not running). Lenovo's own Vantage profile slots are not programmable through the documented "
-            "HID protocol; this app keeps four equivalent userspace profiles instead. Always confirm the physical "
-            "keyboard changed. Reactive follows clicks on this preview; physical typing reactivity needs "
-            "input-device access and is intentionally not enabled.",
+            "HID protocol; this app keeps four equivalent userspace profiles instead. Reactive needs read access "
+            "to /dev/input (install the keyboard udev rule or join the input group) and maps each key to the zone "
+            "under it. Always confirm the physical keyboard changed.",
             this);
         rgb_note->setWordWrap(true);
         rgb_note->setStyleSheet("color: #9aa5b1; padding: 4px;");
@@ -616,6 +671,10 @@ public:
                 timer_->start(refresh_interval_ms_);
             }
         });
+        connect(temp_unit_combo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+            use_fahrenheit_ = index == 1;
+            refresh_data();
+        });
         connect(apply_profile_btn, &QPushButton::clicked, this, [this]() {
             apply_control("platform_profile", profile_combo_->currentText());
         });
@@ -635,6 +694,10 @@ public:
         connect(rgb_direction_combo_, &QComboBox::currentIndexChanged, this, [this](int) {
             store_controls_into_profile(current_profile_);
         });
+        connect(reactive_color_combo_, &QComboBox::currentIndexChanged, this, [this](int) {
+            store_controls_into_profile(current_profile_);
+            reactive_state_ = legion::core::ReactiveFlashState{};
+        });
         connect(apply_on_login_cb_, &QCheckBox::toggled, this, [this](bool enabled) {
             lighting_config_.apply_on_login = enabled;
         });
@@ -646,7 +709,7 @@ public:
 
         preview_timer_ = new QTimer(this);
         connect(preview_timer_, &QTimer::timeout, this, &LegionMainWindow::update_preview);
-        preview_elapsed_.start();
+        animation_clock_.start();
         preview_timer_->start(40);
 
         live_timer_ = new QTimer(this);
@@ -696,16 +759,19 @@ private:
             const QSignalBlocker block_speed(rgb_speed_spin_);
             const QSignalBlocker block_brightness(rgb_brightness_combo_);
             const QSignalBlocker block_direction(rgb_direction_combo_);
+            const QSignalBlocker block_reactive(reactive_color_combo_);
             const int mode_index = rgb_mode_combo_->findData(static_cast<int>(profile.effect));
             rgb_mode_combo_->setCurrentIndex(mode_index >= 0 ? mode_index : 1);
             rgb_speed_spin_->setValue(std::clamp(profile.speed, 1, 4));
             rgb_brightness_combo_->setCurrentIndex(profile.brightness == 1 ? 0 : 1);
             rgb_direction_combo_->setCurrentIndex(
                 profile.direction == legion::core::WaveDirection::LeftToRight ? 0 : 1);
+            reactive_color_combo_->setCurrentIndex(
+                profile.reactive_mode == legion::core::ReactiveMode::Random ? 1 : 0);
         }
         for (std::size_t zone = 0; zone < profile.zones.size(); ++zone) {
             zone_colors_[zone] = to_qcolor(profile.zones[zone]);
-            update_zone_button_style(zone_buttons_[zone], zone_colors_[zone]);
+            update_zone_button_style(static_cast<int>(zone));
         }
         keyboard_->set_zone_colors(zone_colors_);
     }
@@ -719,6 +785,9 @@ private:
         profile.direction = rgb_direction_combo_->currentIndex() == 0
             ? legion::core::WaveDirection::LeftToRight
             : legion::core::WaveDirection::RightToLeft;
+        profile.reactive_mode = reactive_color_combo_->currentIndex() == 1
+            ? legion::core::ReactiveMode::Random
+            : legion::core::ReactiveMode::Preset;
         for (std::size_t zone = 0; zone < zone_colors_.size(); ++zone) {
             profile.zones[zone] = from_qcolor(zone_colors_[zone]);
         }
@@ -736,6 +805,9 @@ private:
         profile.direction = rgb_direction_combo_->currentIndex() == 0
             ? legion::core::WaveDirection::LeftToRight
             : legion::core::WaveDirection::RightToLeft;
+        profile.reactive_mode = reactive_color_combo_->currentIndex() == 1
+            ? legion::core::ReactiveMode::Random
+            : legion::core::ReactiveMode::Preset;
         for (std::size_t zone = 0; zone < zone_colors_.size(); ++zone) {
             profile.zones[zone] = from_qcolor(zone_colors_[zone]);
         }
@@ -749,6 +821,8 @@ private:
         rgb_speed_spin_->setEnabled(animated);
         rgb_brightness_combo_->setEnabled(effect != legion::core::LightingEffect::Off);
         rgb_direction_combo_->setEnabled(legion::core::effect_uses_direction(effect));
+        reactive_color_combo_->setEnabled(effect == legion::core::LightingEffect::Reactive);
+        realtime_cb_->setEnabled(effect == legion::core::LightingEffect::Static);
         const bool uses_zones = legion::core::effect_uses_zones(effect);
         for (auto* button : zone_buttons_) {
             button->setEnabled(uses_zones);
@@ -756,53 +830,138 @@ private:
         if (legion::core::is_hardware_effect(effect)) {
             rgb_kind_label_->setText("Native firmware effect (written to the ITE 8295 controller).");
         } else if (effect == legion::core::LightingEffect::Reactive) {
-            rgb_kind_label_->setText("Software effect: click a zone on the preview to flash it. "
-                                     "Physical typing reactivity is not enabled.");
+            rgb_kind_label_->setText("Software effect: pressing a key flashes the zone that contains it. "
+                                     "Preset colors use the zone colors; Random picks a new color per press.");
         } else {
             rgb_kind_label_->setText("Software effect: legion-lightd animates it at login; this app animates it "
                                      "directly when the daemon is not running.");
         }
     }
 
-    static void update_zone_button_style(QPushButton* button, const QColor& color) {
+    void update_zone_button_style(int zone) {
+        auto* button = zone_buttons_[static_cast<std::size_t>(zone)];
+        const QColor color = zone_colors_[static_cast<std::size_t>(zone)];
+        const bool selected = zone == selected_zone_;
         button->setStyleSheet(
-            QString("background-color: %1; color: %2; font-weight: bold; padding: 8px;")
-                .arg(color.name(), color.lightness() > 128 ? "#111111" : "#ffffff"));
+            QString("background-color: %1; color: %2; font-weight: bold; padding: 8px; border: %3;")
+                .arg(color.name(), color.lightness() > 128 ? "#111111" : "#ffffff",
+                     selected ? "2px solid #00d4ff" : "1px solid #2b3140"));
     }
 
-    void choose_zone_color(int zone) {
+    void select_zone(int zone) {
         if (zone < 0 || zone > 3) return;
-        const QColor chosen = QColorDialog::getColor(
-            zone_colors_[static_cast<std::size_t>(zone)], this,
-            QString("Select Zone %1 Color").arg(zone + 1));
-        if (!chosen.isValid()) return;
-        zone_colors_[static_cast<std::size_t>(zone)] = chosen;
-        update_zone_button_style(zone_buttons_[static_cast<std::size_t>(zone)], chosen);
-        keyboard_->set_zone_colors(zone_colors_);
-        store_controls_into_profile(current_profile_);
+        selected_zone_ = zone;
+        for (int i = 0; i < 4; ++i) update_zone_button_style(i);
+        keyboard_->set_highlight_zone(zone);
         if (current_effect() == legion::core::LightingEffect::Reactive) {
             flash_zone(zone);
         }
     }
 
-    void flash_zone(int zone) {
-        if (zone < 0 || zone > 3) return;
-        keyboard_->set_highlight_zone(zone);
-        reactive_clear_timer_->start(220);
-        if (direct_session_.is_open() && current_effect() == legion::core::LightingEffect::Reactive) {
-            auto profile = current_ui_profile();
-            auto frame = legion::core::sample_lighting_frame(
-                legion::core::LightingEffect::Reactive, profile, 0.0);
-            frame[static_cast<std::size_t>(zone)] = from_qcolor(zone_colors_[static_cast<std::size_t>(zone)]);
-            std::string error;
-            direct_session_.apply_zones(frame, profile.brightness, error);
+    void apply_palette_color(const QColor& color) {
+        apply_zone_color(selected_zone_, color, true);
+    }
+
+    void open_custom_color() {
+        const int zone = selected_zone_;
+        QColorDialog dialog(zone_colors_[static_cast<std::size_t>(zone)], this);
+        dialog.setWindowTitle(QString("Zone %1 Color").arg(zone + 1));
+        dialog.setOption(QColorDialog::DontUseNativeDialog, true);
+        connect(&dialog, &QColorDialog::currentColorChanged, this, [this, zone](const QColor& color) {
+            if (color.isValid()) apply_zone_color(zone, color, true);
+        });
+        dialog.exec();
+    }
+
+    void apply_zone_color(int zone, const QColor& color, bool live) {
+        if (zone < 0 || zone > 3 || !color.isValid()) return;
+        zone_colors_[static_cast<std::size_t>(zone)] = color;
+        update_zone_button_style(zone);
+        keyboard_->set_zone_colors(zone_colors_);
+        store_controls_into_profile(current_profile_);
+        if (live && realtime_cb_ != nullptr && realtime_cb_->isChecked() &&
+            current_effect() == legion::core::LightingEffect::Static) {
+            apply_live_static();
         }
     }
 
-    void update_preview() {
+    void apply_live_static() {
+        store_controls_into_profile(current_profile_);
+        auto profile = current_ui_profile();
+        profile.effect = legion::core::LightingEffect::Static;
+        if (send_lightd_preview(profile)) {
+            rgb_status_label_->setText("Realtime color sent to legion-lightd.");
+            return;
+        }
+        std::string error;
+        if (!direct_session_.is_open() && !direct_session_.open(error)) {
+            rgb_status_label_->setText(
+                "Realtime preview needs /dev/hidraw access: install packaging/udev/60-legion-rgb.rules.");
+            return;
+        }
+        if (!direct_session_.apply_zones(profile.zones, profile.brightness, error)) {
+            direct_session_.reset();
+            rgb_status_label_->setText(
+                QString("Realtime write failed: %1").arg(QString::fromStdString(error)));
+            return;
+        }
+        rgb_status_label_->setText("Realtime color written directly.");
+    }
+
+    void flash_zone(int zone) {
+        if (zone < 0 || zone > 3) return;
+        keyboard_->set_highlight_zone(zone);
+        reactive_clear_timer_->start(260);
         const auto profile = current_ui_profile();
-        const double seconds = static_cast<double>(preview_elapsed_.elapsed()) / 1000.0;
-        const auto frame = legion::core::sample_lighting_frame(profile.effect, profile, seconds);
+        const double now = static_cast<double>(animation_clock_.elapsed()) / 1000.0;
+        const auto seed = static_cast<std::uint32_t>(now * 1000.0) +
+                          static_cast<std::uint32_t>(zone + 1) * 40503U;
+        legion::core::reactive_flash(reactive_state_, zone,
+                                     legion::core::reactive_color_for(profile, zone, seed), now);
+    }
+
+    bool ensure_keyboard_input() {
+        if (keyboard_input_.is_open()) return true;
+        const qint64 now = animation_clock_.elapsed();
+        if (now - last_keyboard_attempt_ms_ < 2000) return false;
+        last_keyboard_attempt_ms_ = now;
+        std::string error;
+        return keyboard_input_.open(error);
+    }
+
+    void poll_reactive_input() {
+        if (current_effect() != legion::core::LightingEffect::Reactive) return;
+        if (!ensure_keyboard_input()) return;
+        const auto profile = current_ui_profile();
+        const double now = static_cast<double>(animation_clock_.elapsed()) / 1000.0;
+        keyboard_input_.poll([&](int code, bool pressed) {
+            if (!pressed) return;
+            const int zone = legion::backends::lenovo::legion_key_to_zone(code);
+            if (zone < 0) return;
+            const auto seed = static_cast<std::uint32_t>(now * 1000.0) +
+                              static_cast<std::uint32_t>(code) * 2654435761U;
+            legion::core::reactive_flash(reactive_state_, zone,
+                                         legion::core::reactive_color_for(profile, zone, seed), now);
+            keyboard_->set_highlight_zone(zone);
+            reactive_clear_timer_->start(200);
+        });
+    }
+
+    std::array<legion::core::Rgb, 4> sample_current(double seconds) const {
+        const auto profile = current_ui_profile();
+        if (profile.effect == legion::core::LightingEffect::Reactive) {
+            return legion::core::reactive_render(reactive_state_, profile);
+        }
+        return legion::core::sample_lighting_frame(profile.effect, profile, seconds);
+    }
+
+    void update_preview() {
+        const double seconds = static_cast<double>(animation_clock_.elapsed()) / 1000.0;
+        if (current_effect() == legion::core::LightingEffect::Reactive) {
+            poll_reactive_input();
+            legion::core::reactive_decay(reactive_state_, seconds);
+        }
+        const auto frame = sample_current(seconds);
         std::array<QColor, 4> colors{};
         for (std::size_t i = 0; i < frame.size(); ++i) {
             colors[i] = to_qcolor(frame[i]);
@@ -878,7 +1037,7 @@ private:
             return;
         }
         live_profile_ = profile;
-        live_elapsed_.restart();
+        reactive_state_ = legion::core::ReactiveFlashState{};
         live_timer_->start(40);
     }
 
@@ -893,8 +1052,13 @@ private:
             stop_live_animation();
             return;
         }
-        const double seconds = static_cast<double>(live_elapsed_.elapsed()) / 1000.0;
-        const auto frame = legion::core::sample_lighting_frame(live_profile_.effect, live_profile_, seconds);
+        const double seconds = static_cast<double>(animation_clock_.elapsed()) / 1000.0;
+        std::array<legion::core::Rgb, 4> frame{};
+        if (live_profile_.effect == legion::core::LightingEffect::Reactive) {
+            frame = legion::core::reactive_render(reactive_state_, live_profile_);
+        } else {
+            frame = legion::core::sample_lighting_frame(live_profile_.effect, live_profile_, seconds);
+        }
         std::string error;
         if (!direct_session_.apply_zones(frame, live_profile_.brightness, error)) {
             stop_live_animation();
@@ -902,6 +1066,16 @@ private:
             rgb_status_label_->setText(QString("Live animation stopped: %1")
                                            .arg(QString::fromStdString(error)));
         }
+    }
+
+    bool send_lightd_preview(const legion::core::LightingProfile& profile) {
+        std::string command = "preview";
+        for (const auto& zone : profile.zones) {
+            command += " " + std::to_string(zone.r) + " " + std::to_string(zone.g) + " " +
+                       std::to_string(zone.b);
+        }
+        command += " " + std::to_string(profile.brightness);
+        return send_lightd_command(command);
     }
 
     QString find_helper_path() const {
@@ -950,6 +1124,19 @@ private:
         run_helper({"set", key, value});
     }
 
+    QString temp_unit() const { return use_fahrenheit_ ? "°F" : "°C"; }
+
+    double display_temp(double celsius) const {
+        return use_fahrenheit_ ? celsius_to_fahrenheit(celsius) : celsius;
+    }
+
+    GaugeArc make_temp_arc(const QString& label, double celsius, double max_celsius,
+                           double warn, double crit, bool valid) const {
+        const double lo = display_temp(0.0);
+        const double hi = display_temp(max_celsius);
+        return {label, display_temp(celsius), lo, hi, temp_color(celsius, warn, crit), valid, temp_unit(), 0};
+    }
+
     void refresh_data() {
         auto snapshot = linux_provider_.collect_system_metadata();
         linux_provider_.collect(snapshot.capabilities, snapshot.readings);
@@ -993,13 +1180,19 @@ private:
             } else {
                 texts[reading.id] = reading.text_value;
             }
+            const bool is_celsius = reading.is_numeric &&
+                                    reading.unit == legion::core::SensorUnit::Celsius;
+            const double shown_value = (is_celsius && use_fahrenheit_)
+                ? celsius_to_fahrenheit(reading.numeric_value)
+                : reading.numeric_value;
+            QString unit_text = QString::fromStdString(legion::core::to_string(reading.unit));
+            if (is_celsius && use_fahrenheit_) unit_text = "F";
             const QString value = reading.is_numeric
-                ? QString::number(reading.numeric_value, 'f', 2)
+                ? QString::number(shown_value, 'f', 2)
                 : QString::fromStdString(reading.text_value);
             sensors_table_->setItem(i, 0, new QTableWidgetItem(QString::fromStdString(reading.label)));
             sensors_table_->setItem(i, 1, new QTableWidgetItem(value));
-            sensors_table_->setItem(i, 2, new QTableWidgetItem(
-                QString::fromStdString(legion::core::to_string(reading.unit))));
+            sensors_table_->setItem(i, 2, new QTableWidgetItem(unit_text));
             sensors_table_->setItem(i, 3, new QTableWidgetItem(
                 QString::fromStdString(legion::core::to_string(reading.state))));
         }
@@ -1023,15 +1216,16 @@ private:
         } else if (has_freq) {
             cpu_arcs.append({"Freq", freq_ghz, 0.0, max_freq_ghz, QColor("#ffb300"), true, "GHz", 2});
         }
-        cpu_arcs.append({"Temp", max_cpu_temp, 0.0, 105.0,
-                         temp_color(max_cpu_temp, 80.0, 92.0), has_cpu_temp, "°C", 0});
+        cpu_arcs.append(make_temp_arc("Temp", max_cpu_temp, 105.0, 80.0, 92.0, has_cpu_temp));
         cpu_gauge_->set_arcs(cpu_arcs);
         QStringList cpu_parts;
         if (has_freq) cpu_parts << QString("%1 GHz").arg(freq_ghz, 0, 'f', 2);
         if (has_power) cpu_parts << QString("%1 W").arg(power, 0, 'f', 1);
         if (has_usage) cpu_parts << QString("%1%").arg(usage, 0, 'f', 0);
-        cpu_gauge_->set_center(has_cpu_temp ? QString("%1 °C").arg(max_cpu_temp, 0, 'f', 0) : "--",
-                               cpu_parts.join(" • "));
+        cpu_gauge_->set_center(
+            has_cpu_temp ? QString("%1 %2").arg(display_temp(max_cpu_temp), 0, 'f', 0).arg(temp_unit())
+                         : "--",
+            cpu_parts.join(" • "));
 
         const bool has_gpu = numbers.count("nvidia.gpu.temp") > 0;
         const double gpu_temp = has_gpu ? numbers["nvidia.gpu.temp"] : 0.0;
@@ -1046,8 +1240,7 @@ private:
                          numbers.count("nvidia.gpu.util") > 0, "%", 0});
         gpu_arcs.append({"Power", gpu_power, 0.0, gpu_power_limit, QColor("#ffb300"),
                          numbers.count("nvidia.gpu.power") > 0, "W", 0});
-        gpu_arcs.append({"Temp", gpu_temp, 0.0, 95.0, temp_color(gpu_temp, 75.0, 86.0),
-                         has_gpu, "°C", 0});
+        gpu_arcs.append(make_temp_arc("Temp", gpu_temp, 95.0, 75.0, 86.0, has_gpu));
         gpu_gauge_->set_arcs(gpu_arcs);
         QStringList gpu_parts;
         if (numbers.count("nvidia.gpu.clock_mhz")) gpu_parts << QString("%1 MHz").arg(gpu_clock, 0, 'f', 0);
@@ -1055,16 +1248,16 @@ private:
             gpu_parts << QString("%1 / %2 W").arg(gpu_power, 0, 'f', 1).arg(gpu_power_limit, 0, 'f', 0);
         }
         if (numbers.count("nvidia.gpu.fan_percent")) gpu_parts << QString("Fan %1%").arg(gpu_fan, 0, 'f', 0);
-        gpu_gauge_->set_center(has_gpu ? QString("%1 °C").arg(gpu_temp, 0, 'f', 0) : "--",
-                               gpu_parts.join(" • "));
+        gpu_gauge_->set_center(
+            has_gpu ? QString("%1 %2").arg(display_temp(gpu_temp), 0, 'f', 0).arg(temp_unit()) : "--",
+            gpu_parts.join(" • "));
 
         const bool has_storage = numbers.count("storage.root_used_percent") > 0;
         const double storage_used = has_storage ? numbers["storage.root_used_percent"] : 0.0;
         const bool has_nvme = max_nvme_temp >= 0.0;
         QVector<GaugeArc> nvme_arcs;
         nvme_arcs.append({"Used", storage_used, 0.0, 100.0, QColor("#7c4dff"), has_storage, "%", 0});
-        nvme_arcs.append({"Temp", max_nvme_temp, 0.0, 85.0,
-                          temp_color(max_nvme_temp, 65.0, 75.0), has_nvme, "°C", 0});
+        nvme_arcs.append(make_temp_arc("Temp", max_nvme_temp, 85.0, 65.0, 75.0, has_nvme));
         nvme_gauge_->set_arcs(nvme_arcs);
         QString nvme_secondary;
         if (has_storage) {
@@ -1073,8 +1266,9 @@ private:
                                  .arg(numbers.count("storage.root_total_gb")
                                           ? numbers["storage.root_total_gb"] : 0.0, 0, 'f', 0);
         }
-        nvme_gauge_->set_center(has_nvme ? QString("%1 °C").arg(max_nvme_temp, 0, 'f', 0) : "--",
-                                nvme_secondary);
+        nvme_gauge_->set_center(
+            has_nvme ? QString("%1 %2").arg(display_temp(max_nvme_temp), 0, 'f', 0).arg(temp_unit()) : "--",
+            nvme_secondary);
 
         const bool has_charge = numbers.count("battery.capacity") > 0;
         const bool has_health = numbers.count("battery.health_percent") > 0;
@@ -1170,6 +1364,8 @@ private:
     QLabel* status_label_ = nullptr;
     QCheckBox* auto_refresh_cb_ = nullptr;
     QDoubleSpinBox* interval_spin_ = nullptr;
+    QComboBox* temp_unit_combo_ = nullptr;
+    bool use_fahrenheit_ = false;
     int refresh_interval_ms_ = 1000;
 
     MultiArcGauge* cpu_gauge_ = nullptr;
@@ -1193,12 +1389,15 @@ private:
                                           QColor("#00d4ff"), QColor("#00d4ff")};
     std::array<QPushButton*, 4> zone_buttons_ = {nullptr, nullptr, nullptr, nullptr};
     KeyboardWidget* keyboard_ = nullptr;
+    int selected_zone_ = 0;
     QComboBox* rgb_profile_combo_ = nullptr;
     QCheckBox* apply_on_login_cb_ = nullptr;
     QComboBox* rgb_mode_combo_ = nullptr;
     QSpinBox* rgb_speed_spin_ = nullptr;
     QComboBox* rgb_brightness_combo_ = nullptr;
     QComboBox* rgb_direction_combo_ = nullptr;
+    QComboBox* reactive_color_combo_ = nullptr;
+    QCheckBox* realtime_cb_ = nullptr;
     QLabel* rgb_kind_label_ = nullptr;
     QLabel* rgb_status_label_ = nullptr;
 
@@ -1206,8 +1405,10 @@ private:
     QTimer* preview_timer_ = nullptr;
     QTimer* live_timer_ = nullptr;
     QTimer* reactive_clear_timer_ = nullptr;
-    QElapsedTimer preview_elapsed_;
-    QElapsedTimer live_elapsed_;
+    QElapsedTimer animation_clock_;
+    qint64 last_keyboard_attempt_ms_ = 0;
+    legion::core::ReactiveFlashState reactive_state_;
+    legion::backends::linux_input::KeyboardInput keyboard_input_;
     legion::core::LightingProfile live_profile_;
 };
 

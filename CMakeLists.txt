@@ -21,9 +21,11 @@ target_include_directories(legion_core PUBLIC
 
 add_library(legion_backends STATIC
     backends/linux/src/linux_telemetry.cpp
+    backends/linux/src/keyboard_input.cpp
     backends/nvidia/src/nvidia_telemetry.cpp
     backends/lenovo/src/lenovo_telemetry.cpp
     backends/lenovo/src/lenovo_rgb.cpp
+    backends/lenovo/src/lenovo_keymap.cpp
 )
 target_include_directories(legion_backends PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/backends/linux/include
@@ -49,8 +51,10 @@ target_link_libraries(legion-lightd PRIVATE legion_backends legion_core Threads:
 
 find_package(Qt6 COMPONENTS Widgets QUIET)
 if(Qt6_FOUND)
+    set(CMAKE_AUTORCC ON)
     add_executable(legion-gui
         apps/desktop/main.cpp
+        apps/desktop/resources.qrc
     )
     target_link_libraries(legion-gui PRIVATE legion_backends legion_core Qt6::Widgets)
 endif()

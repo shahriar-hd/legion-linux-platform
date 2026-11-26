@@ -19,15 +19,15 @@ Target controller: USB `048d:c965` (ITE Device 8295), also seen as `c955`, `c963
 [4]      brightness  1 low | 2 high
 [5..16]  4 zones × R,G,B, left to right (static and breathing only)
 [17]     padding     0x00
-[18]     wave LTR    0x01 when the wave scrolls left to right
-[19]     wave RTL    0x01 when the wave scrolls right to left
+[18]     wave RTL    0x01 when the wave scrolls right to left
+[19]     wave LTR    0x01 when the wave scrolls left to right
 [20..32] unused      0x00
 ```
 
 Notes:
 
 - Brightness is `1..2`, not `0..2`. Off is the separate `0x00` effect.
-- Wave must set exactly one direction flag. The earlier helper wrote a direction value into byte 18 only, which is wrong for right-to-left.
+- Wave must set exactly one direction flag. On this firmware byte 19 drives a left-to-right sweep and byte 18 a right-to-left sweep (verified by user-observable direction).
 - Static and breathing read the per-zone colours. Wave and smooth use firmware colours.
 
 ## Evidence
@@ -56,12 +56,25 @@ Native firmware effects:
 Software effects are synthesized by repeatedly writing static frames:
 
 - Heartbeat
-- Rainbow
+- Rainbow (a seamless 4-zone slice of the hue wheel that shifts continuously)
 - Dance / disco
 - Random
-- Reactive (preview click-to-flash)
+- Reactive (a keypress flashes the zone that contains the key; preset or random colour)
 
 `legion-lightd` animates software effects at ~25 FPS and stops on write failure. The GUI animates them directly only when the daemon is not running.
+
+## Reactive input
+
+Reactive lighting reads the internal keyboard event device (evdev) without grabbing it, maps each key code to one of the four zones, and fades the zone colour out over roughly 0.4 s. The zone map for this machine is:
+
+| Zone | Keys (anchors) |
+| --- | --- |
+| 0 (left) | F1–F5, `1`–`4`, Tab/Q/W/E/R, Caps/A/S/D/F, Shift/Z/X/C/V |
+| 1 | F6–F10, `5`–`9`, T/Y/U/I/O, G/H/J/K, B/N/M/`,` |
+| 2 | F11–F12, `0`/`-`/`=`/Backspace, P/`[`/`]`/`\`, L/`;`/`'`/Enter, `.`/`/`, RShift, arrows |
+| 3 | numeric keypad (and the shared Insert/Home/End/PgUp/PgDn keys) |
+
+Reading requires the `71-legion-keyboard-input.rules` uaccess rule or membership in the `input` group.
 
 ## Vantage profile slots
 
